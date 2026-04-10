@@ -18,6 +18,7 @@
     </header>
     <main>
       <p id="msg" class="muted"></p>
+      <button id="fallbackBtn" type="button" class="btn btn-ghost btn-sm" hidden>Reload in Compatibility Mode</button>
       <div id="videoContainer"></div>
     </main>
     <script>
@@ -40,9 +41,49 @@
       }
 
       (async function () {
+        const msgEl = document.getElementById("msg");
+        const fallbackBtn = document.getElementById("fallbackBtn");
+        let hasFallbackBeenShown = false;
+        const params = new URLSearchParams(location.search);
+        const compatibilityMode = params.get("compatibility") === "1";
+
+        function logFallback(event, details) {
+          try {
+            console.log("[live:fallback]", event, details || "");
+          } catch (_) {}
+        }
+
+        logFallback("init", {
+          href: location.href,
+          compatibilityMode,
+        });
+
+        // Seed a default target so clicks always have a deterministic navigation path.
+        fallbackBtn.setAttribute("data-target-url", getCompatibilityModeUrl(!compatibilityMode));
+
+        fallbackBtn.addEventListener("click", function () {
+          const targetUrl = fallbackBtn.getAttribute("data-target-url") || getCompatibilityModeUrl(!compatibilityMode);
+          logFallback("button-click", {
+            hidden: fallbackBtn.hidden,
+            disabled: fallbackBtn.disabled,
+            targetUrl,
+          });
+          if (!targetUrl) return;
+          fallbackBtn.disabled = true;
+          logFallback("navigate", { to: targetUrl });
+          location.href = targetUrl;
+        });
+
+        function getCompatibilityModeUrl(enabled) {
+          const next = new URL(location.href);
+          if (enabled) next.searchParams.set("compatibility", "1");
+          else next.searchParams.delete("compatibility");
+          return next.toString();
+        }
+
         const id = new URLSearchParams(location.search).get("l");
         if (!id) {
-          document.getElementById("msg").textContent = "Missing livestream id.";
+          msgEl.textContent = "Missing livestream id.";
           return;
         }
         let data;
@@ -58,8 +99,7 @@
           console.warn(e);
         }
         if (data.access_denied) {
-          document.getElementById("msg").textContent =
-            "This stream is not available yet, has ended, or was archived.";
+          msgEl.textContent = "This stream is not available yet, has ended, or was archived.";
           return;
         }
         let playback;
@@ -70,13 +110,15 @@
           });
         } catch (e) {
           console.error(e);
-          document.getElementById("msg").textContent = "Playback unavailable. Please refresh and try again.";
+          msgEl.textContent = "Playback unavailable. Please refresh and try again.";
           return;
         }
-        document.getElementById("msg").textContent =
+        msgEl.textContent =
           "Playback expires around " + new Date(playback.hlsExpiresAt).toLocaleTimeString() + " (refresh page to renew).";
-        function bootJw() {
-          jwplayer("videoContainer").setup({
+
+        function bootJwHls() {
+          const player = jwplayer("videoContainer");
+          player.setup({
             file: playback.playbackUrl,
             type: "hls",
             autostart: false,
@@ -84,14 +126,105 @@
             aspectratio: "16:9",
           });
         }
-        const s = document.createElement("script");
-        s.src = window.__JW_LIBRARY_URL__;
-        s.onload = bootJw;
-        s.onerror = function () {
-          document.getElementById("msg").textContent = "Failed to load JW Player script.";
-        };
-        document.head.appendChild(s);
+
+        function showFallbackButton(reason) {
+          if (hasFallbackBeenShown) return;
+          hasFallbackBeenShown = true;
+          msgEl.textContent = reason + " Click the button to reload in standard HLS compatibility mode.";
+          fallbackBtn.hidden = false;
+          fallbackBtn.disabled = false;
+          fallbackBtn.textContent = "Reload in Compatibility Mode";
+          fallbackBtn.setAttribute("data-target-url", getCompatibilityModeUrl(true));
+          logFallback("show-button", {
+            reason,
+            targetUrl: fallbackBtn.getAttribute("data-target-url"),
+          });
+        }
+
+        function loadScript(src) {
+          return new Promise((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = src;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+          });
+        }
+
+        function bootJwIvs() {
+          const player = jwplayer("videoContainer");
+          player.setup({
+            playlist: [
+              {
+                file: playback.playbackUrl,
+                type: "ivs",
+              },
+            ],
+            cast: null,
+            autostart: false,
+            width: "100%",
+            aspectratio: "16:9",
+          });
+
+          player.on("error", function () {
+            showFallbackButton("IVS playback failed.");
+          });
+
+          player.on("providerPlayer", function (provider) {
+            window.__ivsPlayer__ = provider.ivsPlayer;
+            window.__ivsEvents__ = provider.ivsEvents;
+
+            try {
+              const eventType = provider.ivsEvents && provider.ivsEvents.PlayerEventType;
+              if (provider.ivsPlayer && eventType && eventType.ERROR) {
+                provider.ivsPlayer.addEventListener(eventType.ERROR, function () {
+                  showFallbackButton("IVS playback encountered an error.");
+                });
+              }
+            } catch (_) {
+              // If IVS error hook fails, JW error listener still handles fallback visibility.
+            }
+          });
+        }
+
+        try {
+          await loadScript(window.__JW_LIBRARY_URL__);
+        } catch (_) {
+          msgEl.textContent = "Failed to load JW Player script.";
+          return;
+        }
+
+        if (compatibilityMode) {
+          fallbackBtn.hidden = false;
+          fallbackBtn.disabled = false;
+          fallbackBtn.textContent = "Try IVS Mode";
+          fallbackBtn.setAttribute("data-target-url", getCompatibilityModeUrl(false));
+          logFallback("compatibility-mode-active", {
+            targetUrl: fallbackBtn.getAttribute("data-target-url"),
+          });
+          bootJwHls();
+          msgEl.textContent =
+            "Compatibility mode enabled (standard HLS). Playback expires around " +
+            new Date(playback.hlsExpiresAt).toLocaleTimeString() +
+            " (refresh page to renew).";
+          return;
+        }
+
+        try {
+          await loadScript(
+            window.__IVS_JW_PROVIDER_URL__ ||
+              "https://player.live-video.net/1.50.0/amazon-ivs-jw-provider.min.js"
+          );
+        } catch (_) {
+          logFallback("ivs-provider-load-failed");
+          showFallbackButton("Amazon IVS provider failed to load.");
+          return;
+        }
+
+        logFallback("boot-ivs");
+        bootJwIvs();
       })();
     </script>
   </body>
 </html>
+  
