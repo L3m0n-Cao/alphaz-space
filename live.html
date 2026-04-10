@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Live — alphaz.space</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="config.js"></script>
+    <script src="js/api.js"></script>
+  </head>
+  <body>
+    <header class="site">
+      <h1 id="title">Live</h1>
+      <nav>
+        <a href="home">Home</a>
+      </nav>
+    </header>
+    <main>
+      <p id="msg" class="muted"></p>
+      <div id="videoContainer"></div>
+    </main>
+    <script>
+      async function fetchKickPlaybackUrl(kickUsername) {
+        const url = "https://kick.com/api/v2/channels/" + encodeURIComponent(kickUsername) + "/playback-url";
+        const res = await fetch(url, {
+          headers: {
+            Accept: "application/json",
+          },
+        });
+        if (!res.ok) {
+          throw new Error("Kick playback-url " + res.status);
+        }
+        const json = await res.json();
+        const data = json && json.data;
+        if (typeof data !== "string" || !data.startsWith("http")) {
+          throw new Error("Kick playback-url missing data URL");
+        }
+        return data;
+      }
+
+      (async function () {
+        const id = new URLSearchParams(location.search).get("l");
+        if (!id) {
+          document.getElementById("msg").textContent = "Missing livestream id.";
+          return;
+        }
+        let data;
+        try {
+          data = await AlphazApi.getJson("/api/livestreams/" + encodeURIComponent(id));
+        } catch (_) {
+          return;
+        }
+        document.getElementById("title").textContent = data.title || "Live";
+        try {
+          await AlphazApi.postJson("/api/analytics/view", { type: "live", id: Number(id) });
+        } catch (e) {
+          console.warn(e);
+        }
+        if (data.access_denied) {
+          document.getElementById("msg").textContent =
+            "This stream is not available yet, has ended, or was archived.";
+          return;
+        }
+        let playback;
+        try {
+          const kickPlaybackUrl = await fetchKickPlaybackUrl(data.kick_username);
+          playback = await AlphazApi.postJson("/api/livestreams/" + encodeURIComponent(id) + "/playback", {
+            kickPlaybackUrl,
+          });
+        } catch (e) {
+          console.error(e);
+          document.getElementById("msg").textContent = "Playback unavailable. Please refresh and try again.";
+          return;
+        }
+        document.getElementById("msg").textContent =
+          "Playback expires around " + new Date(playback.hlsExpiresAt).toLocaleTimeString() + " (refresh page to renew).";
+        function bootJw() {
+          jwplayer("videoContainer").setup({
+            file: playback.playbackUrl,
+            type: "hls",
+            autostart: false,
+            width: "100%",
+            aspectratio: "16:9",
+          });
+        }
+        const s = document.createElement("script");
+        s.src = window.__JW_LIBRARY_URL__;
+        s.onload = bootJw;
+        s.onerror = function () {
+          document.getElementById("msg").textContent = "Failed to load JW Player script.";
+        };
+        document.head.appendChild(s);
+      })();
+    </script>
+  </body>
+</html>

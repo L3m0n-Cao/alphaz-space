@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VOD — alphaz.space</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="config.js"></script>
+    <script src="js/api.js"></script>
+  </head>
+  <body>
+    <header class="site">
+      <h1 id="title">VOD</h1>
+      <nav>
+        <a href="home">Home</a>
+      </nav>
+    </header>
+    <main>
+      <p id="msg" class="muted"></p>
+      <div class="vod-frame-wrap">
+        <iframe id="frame" title="VOD" allowfullscreen allow="fullscreen; encrypted-media"></iframe>
+      </div>
+    </main>
+    <script>
+      (async function () {
+        const id = new URLSearchParams(location.search).get("v");
+        if (!id) {
+          document.getElementById("msg").textContent = "Missing VOD id.";
+          return;
+        }
+        let data;
+        try {
+          data = await AlphazApi.getJson("/api/vods/" + encodeURIComponent(id));
+        } catch (_) {
+          return;
+        }
+        document.getElementById("title").textContent = data.title || "VOD";
+        try {
+          await AlphazApi.postJson("/api/analytics/view", { type: "vod", id: Number(id) });
+        } catch (e) {
+          console.warn(e);
+        }
+        const src = data.iframe_src;
+        if (!src || !src.startsWith("https://")) {
+          document.getElementById("msg").textContent = "Invalid embed URL.";
+          return;
+        }
+        document.getElementById("frame").src = src;
+      })();
+    </script>
+  </body>
+</html>

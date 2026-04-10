@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Admin — alphaz.space</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="config.js"></script>
+    <script src="js/api.js"></script>
+  </head>
+  <body>
+    <header class="site">
+      <h1>Admin</h1>
+      <nav>
+        <a href="home">Home</a>
+      </nav>
+    </header>
+    <main>
+      <p id="denied" class="error" style="display: none">You are not an admin.</p>
+      <div id="panel" style="display: none">
+        <h2>New livestream</h2>
+        <form id="newLive">
+          <div class="form-group"><label>Title</label><input name="title" required /></div>
+          <div class="form-group"><label>Description</label><textarea name="description" rows="2"></textarea></div>
+          <div class="form-group"><label>Thumbnail URL</label><input name="thumbnail_url" type="url" /></div>
+          <div class="form-group">
+            <label>Start (unix seconds)</label><input name="start_unix" type="number" required />
+          </div>
+          <div class="form-group"><label>Kick username</label><input name="kick_username" required /></div>
+          <button class="btn btn-primary" type="submit">Create</button>
+        </form>
+
+        <h2 style="margin-top: 2rem">Edit livestream</h2>
+        <form id="editLive">
+          <div class="form-group"><label>ID</label><input name="livestream_id" type="number" required /></div>
+          <div class="form-group"><label>Title</label><input name="title" /></div>
+          <div class="form-group"><label>Description</label><textarea name="description" rows="2"></textarea></div>
+          <div class="form-group"><label>Thumbnail URL</label><input name="thumbnail_url" type="url" /></div>
+          <div class="form-group"><label>Start (unix)</label><input name="start_unix" type="number" /></div>
+          <div class="form-group"><label>Kick username</label><input name="kick_username" /></div>
+          <div class="form-group">
+            <label><input type="checkbox" name="archived" value="1" /> Archived</label>
+          </div>
+          <div class="form-group">
+            <label><input type="checkbox" name="force_open" value="1" /> Force open</label>
+          </div>
+          <button class="btn btn-primary" type="submit">Save</button>
+        </form>
+
+        <h2 style="margin-top: 2rem">Livestreams</h2>
+        <table class="data" id="liveTable">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Title</th>
+              <th>Start</th>
+              <th>Flags</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+
+        <h2 style="margin-top: 2rem">New VOD</h2>
+        <form id="newVod">
+          <div class="form-group"><label>Title</label><input name="title" required /></div>
+          <div class="form-group"><label>Description</label><textarea name="description" rows="2"></textarea></div>
+          <div class="form-group"><label>Thumbnail URL</label><input name="thumbnail_url" type="url" /></div>
+          <div class="form-group"><label>Start (unix)</label><input name="start_unix" type="number" required /></div>
+          <div class="form-group">
+            <label>Iframe src (https)</label><input name="iframe_src" type="url" required placeholder="https://..." />
+          </div>
+          <button class="btn btn-primary" type="submit">Create VOD</button>
+        </form>
+
+        <h2 style="margin-top: 2rem">VODs</h2>
+        <table class="data" id="vodTable">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Title</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+
+        <h2 style="margin-top: 2rem">View events</h2>
+        <p><button type="button" class="btn btn-ghost" id="loadAnalytics">Load recent</button></p>
+        <div style="overflow-x: auto">
+          <table class="data" id="analyticsTable">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>User</th>
+                <th>Type</th>
+                <th>Resource</th>
+                <th>UA</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+    <script>
+      function fmt(ts) {
+        return new Date(ts * 1000).toLocaleString();
+      }
+      async function refreshLists() {
+        const lives = await AlphazApi.getJson("/api/livestreams");
+        const tbody = document.querySelector("#liveTable tbody");
+        tbody.innerHTML = lives
+          .map(
+            (l) => `
+          <tr>
+            <td>${l.id}</td>
+            <td>${l.title.replace(/</g, "&lt;")}</td>
+            <td>${fmt(l.start_unix)}</td>
+            <td>${l.archived ? "arch " : ""}${l.force_open ? "open " : ""}${l.room_open ? "room" : ""}</td>
+            <td>
+              <button type="button" class="btn btn-ghost btn-sm" data-edit-live="${l.id}">Fill edit</button>
+              <button type="button" class="btn btn-ghost" data-start="${l.id}">Start</button>
+              <button type="button" class="btn btn-ghost" data-archive="${l.id}">Archive</button>
+              <button type="button" class="btn btn-danger" data-del-live="${l.id}">Delete</button>
+            </td>
+          </tr>`
+          )
+          .join("");
+        tbody.querySelectorAll("[data-start]").forEach((btn) => {
+          btn.onclick = async () => {
+            await AlphazApi.postJson("/api/admin/livestreams/" + btn.dataset.start + "/start", {});
+            refreshLists();
+          };
+        });
+        tbody.querySelectorAll("[data-archive]").forEach((btn) => {
+          btn.onclick = async () => {
+            await AlphazApi.postJson("/api/admin/livestreams/" + btn.dataset.archive + "/archive", {});
+            refreshLists();
+          };
+        });
+        tbody.querySelectorAll("[data-del-live]").forEach((btn) => {
+          btn.onclick = async () => {
+            if (!confirm("Delete livestream " + btn.dataset.delLive + "?")) return;
+            await AlphazApi.delete("/api/admin/livestreams/" + btn.dataset.delLive);
+            refreshLists();
+          };
+        });
+        tbody.querySelectorAll("[data-edit-live]").forEach((btn) => {
+          btn.onclick = () => {
+            const id = btn.dataset.editLive;
+            const row = lives.find((x) => String(x.id) === id);
+            if (!row) return;
+            const f = document.getElementById("editLive");
+            f.livestream_id.value = row.id;
+            f.title.value = row.title;
+            f.description.value = row.description || "";
+            f.thumbnail_url.value = row.thumbnail_url || "";
+            f.start_unix.value = row.start_unix;
+            f.kick_username.value = row.kick_username;
+            f.archived.checked = row.archived;
+            f.force_open.checked = row.force_open;
+            f.scrollIntoView({ behavior: "smooth" });
+          };
+        });
+
+        const vods = await AlphazApi.getJson("/api/vods");
+        const vt = document.querySelector("#vodTable tbody");
+        vt.innerHTML = vods
+          .map(
+            (v) => `
+          <tr>
+            <td>${v.id}</td>
+            <td>${v.title.replace(/</g, "&lt;")}</td>
+            <td><button type="button" class="btn btn-danger" data-del-vod="${v.id}">Delete</button></td>
+          </tr>`
+          )
+          .join("");
+        vt.querySelectorAll("[data-del-vod]").forEach((btn) => {
+          btn.onclick = async () => {
+            if (!confirm("Delete VOD " + btn.dataset.delVod + "?")) return;
+            await AlphazApi.delete("/api/admin/vods/" + btn.dataset.delVod);
+            refreshLists();
+          };
+        });
+      }
+
+      (async function () {
+        let me;
+        try {
+          me = await AlphazApi.getJson("/api/me");
+        } catch (_) {
+          return;
+        }
+        if (!me.isAdmin) {
+          document.getElementById("denied").style.display = "block";
+          return;
+        }
+        document.getElementById("panel").style.display = "block";
+        await refreshLists();
+
+        document.getElementById("newLive").onsubmit = async (e) => {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          await AlphazApi.postJson("/api/admin/livestreams", {
+            title: fd.get("title"),
+            description: fd.get("description") || "",
+            thumbnail_url: fd.get("thumbnail_url") || "",
+            start_unix: Number(fd.get("start_unix")),
+            kick_username: fd.get("kick_username"),
+          });
+          e.target.reset();
+          refreshLists();
+        };
+
+        document.getElementById("editLive").onsubmit = async (e) => {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const id = fd.get("livestream_id");
+          await AlphazApi.patchJson("/api/admin/livestreams/" + id, {
+            title: fd.get("title") || undefined,
+            description: fd.get("description"),
+            thumbnail_url: fd.get("thumbnail_url"),
+            start_unix: fd.get("start_unix") ? Number(fd.get("start_unix")) : undefined,
+            kick_username: fd.get("kick_username") || undefined,
+            archived: fd.get("archived") === "1",
+            force_open: fd.get("force_open") === "1",
+          });
+          refreshLists();
+        };
+
+        document.getElementById("newVod").onsubmit = async (e) => {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          await AlphazApi.postJson("/api/admin/vods", {
+            title: fd.get("title"),
+            description: fd.get("description") || "",
+            thumbnail_url: fd.get("thumbnail_url") || "",
+            start_unix: Number(fd.get("start_unix")),
+            iframe_src: fd.get("iframe_src"),
+          });
+          e.target.reset();
+          refreshLists();
+        };
+
+        document.getElementById("loadAnalytics").onclick = async () => {
+          const rows = await AlphazApi.getJson("/api/admin/analytics?limit=200");
+          const tb = document.querySelector("#analyticsTable tbody");
+          tb.innerHTML = rows
+            .map(
+              (r) => `
+            <tr>
+              <td>${new Date(r.created_at).toLocaleString()}</td>
+              <td>${r.discord_id}</td>
+              <td>${r.resource_type}</td>
+              <td>${r.resource_id}</td>
+              <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${(r.user_agent || "").replace(/</g, "&lt;")}</td>
+            </tr>`
+            )
+            .join("");
+        };
+      })();
+    </script>
+  </body>
+</html>

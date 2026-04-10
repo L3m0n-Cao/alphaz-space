@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Home — alphaz.space</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="config.js"></script>
+    <script src="js/api.js"></script>
+  </head>
+  <body>
+    <header class="site">
+      <h1>alphaz.space</h1>
+      <nav>
+        <span class="muted" id="who"></span>
+        <a href="admin" id="adminLink" style="display: none">Admin</a>
+        <a href="#" id="logout">Log out</a>
+      </nav>
+    </header>
+    <main>
+      <h2>Livestreams</h2>
+      <div id="lives" class="card-grid"></div>
+      <h2 style="margin-top: 2rem">VODs</h2>
+      <div id="vods" class="card-grid"></div>
+    </main>
+    <script>
+      function fmt(ts) {
+        return new Date(ts * 1000).toLocaleString();
+      }
+      document.getElementById("logout").addEventListener("click", (e) => {
+        e.preventDefault();
+        AlphazApi.setToken(null);
+        location.href = "login";
+      });
+      (async function () {
+        try {
+          const me = await AlphazApi.getJson("/api/me");
+          document.getElementById("who").textContent = me.username || me.discordId;
+          if (me.isAdmin) document.getElementById("adminLink").style.display = "inline";
+        } catch (_) {
+          return;
+        }
+        const lives = await AlphazApi.getJson("/api/livestreams");
+        const vods = await AlphazApi.getJson("/api/vods");
+        const le = document.getElementById("lives");
+        if (!lives.length) le.innerHTML = "<p class=muted>No livestreams yet.</p>";
+        else
+          le.innerHTML = lives
+            .map(
+              (l) => `
+          <a class="card" href="live?l=${l.id}">
+            ${l.thumbnail_url ? `<img class="thumb" src="${l.thumbnail_url.replace(/"/g, "")}" alt="">` : '<div class="thumb"></div>'}
+            <div class="body">
+              <h3>${l.title.replace(/</g, "&lt;")}</h3>
+              <div class="muted">${fmt(l.start_unix)} · ${l.room_open ? "room open" : "room closed"}${l.archived ? " · archived" : ""}</div>
+            </div>
+          </a>`
+            )
+            .join("");
+        const ve = document.getElementById("vods");
+        if (!vods.length) ve.innerHTML = "<p class=muted>No VODs yet.</p>";
+        else
+          ve.innerHTML = vods
+            .map(
+              (v) => `
+          <a class="card" href="vod?v=${v.id}">
+            ${v.thumbnail_url ? `<img class="thumb" src="${v.thumbnail_url.replace(/"/g, "")}" alt="">` : '<div class="thumb"></div>'}
+            <div class="body">
+              <h3>${v.title.replace(/</g, "&lt;")}</h3>
+              <div class="muted">${fmt(v.start_unix)}</div>
+            </div>
+          </a>`
+            )
+            .join("");
+      })();
+    </script>
+  </body>
+</html>
